@@ -57,7 +57,7 @@ function Tiene($comando) { [bool](Get-Command $comando -ErrorAction SilentlyCont
 function Instalar-Winget($id, $nombre, $comando) {
     if ($comando -and (Tiene $comando)) { Ok "$nombre ya esta instalado"; return }
     Write-Host "    Instalando $nombre..."
-    winget install --id $id -e --silent --accept-package-agreements --accept-source-agreements --disable-interactivity | Out-Host
+    Nativo { winget install --id $id -e --silent --accept-package-agreements --accept-source-agreements --disable-interactivity }
     # 0 = listo; -1978335189 = ya estaba instalado y no hay version nueva
     if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1978335189) { Falla "No se pudo instalar $nombre (winget $LASTEXITCODE)" }
     Refrescar-Path
@@ -73,7 +73,22 @@ function Esperar-Puerto($puerto, $segundos) {
     return $false
 }
 
-function Py { & $Python @args; if ($LASTEXITCODE -ne 0) { Falla "Fallo: python $($args -join ' ')" } }
+function Nativo([scriptblock]$Comando) {
+    # Programas como mysqld, git u ollama escriben mensajes NORMALES por el
+    # canal de errores; con $ErrorActionPreference = "Stop", PowerShell 5.1
+    # los toma como falla y corta el instalador. Aqui se corren sin eso y se
+    # juzgan por su codigo de salida ($LASTEXITCODE).
+    $antes = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try { & $Comando 2>&1 | ForEach-Object { Write-Host "    $_" } }
+    finally { $ErrorActionPreference = $antes }
+}
+
+function Py {
+    $argumentos = $args   # dentro del bloque, $args seria otro
+    Nativo { & $Python @argumentos }
+    if ($LASTEXITCODE -ne 0) { Falla "Fallo: python $($argumentos -join ' ')" }
+}
 
 # --- 0. Revisiones ------------------------------------------------------------------
 New-Item -ItemType Directory -Force -Path $Raiz, $Logs | Out-Null
@@ -110,10 +125,10 @@ $mysqlBin = $mysqld.DirectoryName
 # --- 2. El proyecto -----------------------------------------------------------------
 Paso "2/7 Proyecto J.U.L.I.A."
 if (Test-Path (Join-Path $App ".git")) {
-    git -C $App pull --ff-only | Out-Host
+    Nativo { git -C $App pull --ff-only }
     if ($LASTEXITCODE -ne 0) { Aviso "No se pudo actualizar (sin internet o con cambios locales); sigo con lo que hay." } else { Ok "Actualizado" }
 } else {
-    git clone $Repo $App | Out-Host
+    Nativo { git clone $Repo $App }
     if ($LASTEXITCODE -ne 0) { Falla "No se pudo bajar el proyecto de GitHub" }
     Ok "Descargado en $App"
 }
@@ -134,18 +149,29 @@ port=3306
 bind-address=127.0.0.1
 character-set-server=utf8mb4
 "@ | Set-Content -Path $ini -Encoding ASCII   # todo ASCII: ProgramData y Program Files
+    $marca = Join-Path $MysqlDir "inicializado.txt"
+    if ((Test-Path $datos) -and -not (Test-Path $marca)) {
+        # Quedo a medias en un intento anterior (todavia sin servicio ni datos
+        # de nadie): se borra y se vuelve a preparar.
+        Aviso "La carpeta de MySQL quedo incompleta en un intento anterior; se rehace."
+        Remove-Item -Recurse -Force $datos
+    }
     if (-not (Test-Path $datos)) {
         # root sin contrasena: solo se puede entrar desde esta computadora (127.0.0.1)
-        & (Join-Path $mysqlBin "mysqld.exe") --defaults-file="$ini" --initialize-insecure --console 2>&1 | Out-Host
+        $mysqldExe = Join-Path $mysqlBin "mysqld.exe"
+        Nativo { & $mysqldExe --defaults-file="$ini" --initialize-insecure --console }
         if ($LASTEXITCODE -ne 0) { Falla "No se pudo preparar la carpeta de datos de MySQL" }
+        Set-Content -Path $marca -Value (Get-Date -Format s)
     }
-    & (Join-Path $mysqlBin "mysqld.exe") --install $Servicio --defaults-file="$ini" | Out-Host
+    $mysqldExe = Join-Path $mysqlBin "mysqld.exe"
+    Nativo { & $mysqldExe --install $Servicio --defaults-file="$ini" }
     if ($LASTEXITCODE -ne 0) { Falla "No se pudo registrar el servicio $Servicio" }
     Ok "Servicio $Servicio creado (arranca solo con Windows)"
 }
 if ((Get-Service $Servicio).Status -ne "Running") { Start-Service $Servicio }
 if (-not (Esperar-Puerto 3306 30)) { Falla "MySQL no arranco (revisa $MysqlDir\datos\*.err)" }
-& (Join-Path $mysqlBin "mysql.exe") -h 127.0.0.1 -u root -e "CREATE DATABASE IF NOT EXISTS dev002 CHARACTER SET utf8mb4" | Out-Host
+$mysqlExe = Join-Path $mysqlBin "mysql.exe"
+Nativo { & $mysqlExe -h 127.0.0.1 -u root -e "CREATE DATABASE IF NOT EXISTS dev002 CHARACTER SET utf8mb4" }
 if ($LASTEXITCODE -ne 0) { Falla "No se pudo crear la base dev002" }
 Ok "MySQL listo, base dev002"
 
@@ -157,10 +183,10 @@ Paso "4/7 Python y librerias (tarda varios minutos la primera vez)"
 if (-not (Test-Path $Python)) {
     # uv baja su propio Python 3.14 (el mismo que en la Mac; no hace falta
     # instalar Python aparte)
-    uv venv --python 3.14 (Join-Path $Backend ".venv") | Out-Host
+    Nativo { uv venv --python 3.14 (Join-Path $Backend ".venv") }
     if ($LASTEXITCODE -ne 0) { Falla "No se pudo crear el entorno de Python" }
 }
-uv pip install --python $Python -r (Join-Path $Backend "requirements.txt") --overrides (Join-Path $Backend "overrides.txt") | Out-Host
+Nativo { uv pip install --python $Python -r (Join-Path $Backend "requirements.txt") --overrides (Join-Path $Backend "overrides.txt") }
 if ($LASTEXITCODE -ne 0) { Falla "No se pudieron instalar las librerias de Python" }
 Ok "Librerias instaladas"
 
@@ -175,7 +201,7 @@ $linea = Select-String -Path $envFile -Pattern '^OLLAMA_MODEL=(.+)$' | Select-Ob
 if ($linea) { $modelo = $linea.Matches[0].Groups[1].Value.Trim() }
 foreach ($m in @($modelo, "nomic-embed-text")) {
     Write-Host "    Ollama: $m"
-    ollama pull $m | Out-Host
+    Nativo { ollama pull $m }
     if ($LASTEXITCODE -ne 0) { Falla "No se pudo bajar el modelo $m" }
 }
 Push-Location $Backend
@@ -188,7 +214,10 @@ Ok "Modelos listos"
 Paso "6/7 Datos del despacho"
 Push-Location $Backend
 Py -c "from app.database import init_db; init_db()"
-$hayClientes = (& (Join-Path $mysqlBin "mysql.exe") -h 127.0.0.1 -u root -N -e "SELECT COUNT(*) FROM dev002.clients") -as [int]
+$hayClientes = 0
+$ErrorActionPreference = "Continue"
+$hayClientes = (& $mysqlExe -h 127.0.0.1 -u root -N -e "SELECT COUNT(*) FROM dev002.clients" 2>$null) -as [int]
+$ErrorActionPreference = "Stop"
 if ($hayClientes -gt 0) {
     Ok "Ya hay $hayClientes clientes; no se importa nada"
 } else {
