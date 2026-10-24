@@ -10,7 +10,10 @@
 # Que hace:
 #   1. Instala con winget lo que falte: Git, uv (Python), Ollama, MySQL y
 #      el runtime de Visual C++.
-#   2. Baja el proyecto de GitHub a %LOCALAPPDATA%\JULIA\app (o lo actualiza).
+#   2. Baja el proyecto de GitHub a <disco>\JULIA\app (o lo actualiza). Si C:
+#      tiene poco espacio y hay otro disco local (D:) con mas, lo pesado va
+#      ahi: proyecto, Python, librerias, modelos de voz y de Ollama, caches.
+#      Para forzar una carpeta: $env:JULIA_DIR = "D:\JULIA" antes del comando.
 #   3. Prepara MySQL como servicio de Windows ("JULIA-MySQL", solo escucha
 #      en 127.0.0.1) y crea la base dev002.
 #   4. Crea el entorno de Python e instala las librerias.
@@ -28,7 +31,22 @@ $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"   # las barras de progreso hacen MUY lento Invoke-WebRequest
 
 $Repo     = "https://github.com/SLC-404/J.U.L.I.A.git"
-$Raiz     = if ($env:JULIA_DIR) { $env:JULIA_DIR } else { Join-Path $env:LOCALAPPDATA "JULIA" }
+
+function Elegir-Raiz {
+    # 1. La que se pidio a mano, o la de una instalacion anterior
+    if ($env:JULIA_DIR) { return $env:JULIA_DIR }
+    $antes = [Environment]::GetEnvironmentVariable("JULIA_DIR", "User")
+    if ($antes) { return $antes }
+    # 2. Si C: esta justo de espacio, el disco LOCAL (no USB ni red) con mas
+    #    espacio libre. Lo pesado ocupa ~20 GB.
+    $discos = Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" | Sort-Object FreeSpace -Descending
+    $c = $discos | Where-Object { $_.DeviceID -eq "C:" }
+    $mejor = $discos | Select-Object -First 1
+    if ($mejor -and $mejor.DeviceID -ne "C:" -and $c.FreeSpace -lt 40GB) { return "$($mejor.DeviceID)\JULIA" }
+    return (Join-Path $env:LOCALAPPDATA "JULIA")
+}
+
+$Raiz     = Elegir-Raiz
 $App      = Join-Path $Raiz "app"
 $Backend  = Join-Path $App "backend"
 $Python   = Join-Path $Backend ".venv\Scripts\python.exe"
@@ -102,9 +120,17 @@ $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
 if (-not $admin) { Falla "Abre PowerShell como administrador (clic derecho > Ejecutar como administrador) y vuelve a correr el comando." }
 if (-not [Environment]::Is64BitOperatingSystem) { Falla "J.U.L.I.A. necesita Windows de 64 bits." }
 if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { Aviso "Esta computadora es ARM (Snapdragon): algunas partes pueden ir lentas o no funcionar." }
-$libre = [math]::Round((Get-PSDrive ($Raiz.Substring(0, 1))).Free / 1GB)
-if ($libre -lt 25) { Falla "Se necesitan unos 25 GB libres en el disco y hay $libre GB." }
-Ok "Administrador, 64 bits, $libre GB libres"
+$libre  = [math]::Round((Get-PSDrive ($Raiz.Substring(0, 1))).Free / 1GB)
+$libreC = [math]::Round((Get-PSDrive C).Free / 1GB)
+if ($libre -lt 22) { Falla "Se necesitan unos 22 GB libres en $($Raiz.Substring(0, 2)) y hay $libre GB." }
+if ($libreC -lt 4) { Falla "C: casi no tiene espacio ($libreC GB). Libera al menos 4 GB y vuelve a intentar." }
+Ok "Administrador, 64 bits, $libre GB libres en $($Raiz.Substring(0, 2))"
+# Que la siguiente vez (reparar, actualizar) use la misma carpeta
+[Environment]::SetEnvironmentVariable("JULIA_DIR", $Raiz, "User")
+# Caches de descargas en la misma carpeta (por defecto irian a C:)
+$env:UV_CACHE_DIR          = Join-Path $Raiz "cache\uv"
+$env:UV_PYTHON_INSTALL_DIR = Join-Path $Raiz "python"
+$env:HF_HOME               = Join-Path $Raiz "cache\huggingface"
 if (-not (Tiene "winget")) { Falla "Falta winget (App Installer). Instalalo desde la Microsoft Store y vuelve a intentar." }
 Refrescar-Path
 
@@ -192,6 +218,17 @@ Ok "Librerias instaladas"
 
 # --- 5. Modelos ---------------------------------------------------------------------
 Paso "5/7 Modelos de IA (~12 GB la primera vez; si se corta, vuelve a correr el instalador)"
+# Los modelos de Ollama (~7 GB) van junto a J.U.L.I.A., no en C:\Users\...\.ollama
+$modelosOllama = Join-Path $Raiz "ollama-modelos"
+New-Item -ItemType Directory -Force -Path $modelosOllama | Out-Null
+if ([Environment]::GetEnvironmentVariable("OLLAMA_MODELS", "User") -ne $modelosOllama) {
+    [Environment]::SetEnvironmentVariable("OLLAMA_MODELS", $modelosOllama, "User")
+    # Ollama ya pudo arrancar solo al instalarse (con la carpeta de antes):
+    # se apaga para que vuelva a arrancar leyendo la nueva.
+    Get-Process -Name "ollama*" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep 2
+}
+$env:OLLAMA_MODELS = $modelosOllama
 if (-not (Puerto-Abierto 11434)) {
     Start-Process -WindowStyle Hidden -FilePath "ollama" -ArgumentList "serve"
     if (-not (Esperar-Puerto 11434 30)) { Falla "Ollama no arranco" }

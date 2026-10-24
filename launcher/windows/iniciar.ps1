@@ -17,6 +17,10 @@ $Logs    = Join-Path $Raiz "logs"
 $Puerto  = if ($env:ASISTENTE_PORT) { $env:ASISTENTE_PORT } else { 8000 }
 $Url     = "http://127.0.0.1:$Puerto"
 New-Item -ItemType Directory -Force -Path $Logs | Out-Null
+# Caches y modelos junto a J.U.L.I.A. (puede ser D:), igual que en instalar.ps1
+$env:UV_CACHE_DIR  = Join-Path $Raiz "cache\uv"
+$env:HF_HOME       = Join-Path $Raiz "cache\huggingface"
+if (Test-Path (Join-Path $Raiz "ollama-modelos")) { $env:OLLAMA_MODELS = Join-Path $Raiz "ollama-modelos" }
 $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
             [Environment]::GetEnvironmentVariable("Path", "User") + ";" +
             (Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links") + ";" +
