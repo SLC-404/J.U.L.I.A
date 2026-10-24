@@ -51,9 +51,12 @@ $App      = Join-Path $Raiz "app"
 $Backend  = Join-Path $App "backend"
 $Python   = Join-Path $Backend ".venv\Scripts\python.exe"
 $Logs     = Join-Path $Raiz "logs"
-# Los datos de MySQL van en C:\ProgramData (ruta sin acentos ni espacios: con
-# un usuario "Juana Perez" con acento, MySQL falla en %LOCALAPPDATA%).
-$MysqlDir = Join-Path $env:ProgramData "JULIA\mysql"
+# Datos de MySQL junto a J.U.L.I.A. (p. ej. D:\JULIA\mysql), salvo que la ruta
+# tenga acentos o espacios (usuario "Juana Perez" en %LOCALAPPDATA%): con eso
+# MySQL falla, y entonces van a C:\ProgramData\JULIA\mysql.
+$MysqlDir = if ($Raiz -match '^[A-Za-z0-9:\\_.-]+$') { Join-Path $Raiz "mysql" } else { Join-Path $env:ProgramData "JULIA\mysql" }
+# Programas grandes (Ollama) en otro disco cuando J.U.L.I.A. no va en C:
+$Programas = if ($Raiz.Substring(0, 1) -ne "C") { Join-Path $Raiz "programas" } else { $null }
 $Servicio = "JULIA-MySQL"
 
 function Paso($texto)  { Write-Host ""; Write-Host "==> $texto" -ForegroundColor Cyan }
@@ -67,15 +70,18 @@ function Refrescar-Path {
                 [Environment]::GetEnvironmentVariable("Path", "User") + ";" +
                 (Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links") + ";" +
                 (Join-Path $env:LOCALAPPDATA "Programs\Ollama") + ";" +
+                $(if ($Programas) { (Join-Path $Programas "Ollama") + ";" } else { "" }) +
                 (Join-Path $env:USERPROFILE ".local\bin")
 }
 
 function Tiene($comando) { [bool](Get-Command $comando -ErrorAction SilentlyContinue) }
 
-function Instalar-Winget($id, $nombre, $comando) {
+function Instalar-Winget($id, $nombre, $comando, $ubicacion = $null) {
     if ($comando -and (Tiene $comando)) { Ok "$nombre ya esta instalado"; return }
     Write-Host "    Instalando $nombre..."
-    Nativo { winget install --id $id -e --silent --accept-package-agreements --accept-source-agreements --disable-interactivity }
+    $extra = @()
+    if ($ubicacion) { $extra = @("--location", $ubicacion); Write-Host "    en $ubicacion" }
+    Nativo { winget install --id $id -e --silent --accept-package-agreements --accept-source-agreements --disable-interactivity @extra }
     # 0 = listo; -1978335189 = ya estaba instalado y no hay version nueva
     if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1978335189) { Falla "No se pudo instalar $nombre (winget $LASTEXITCODE)" }
     Refrescar-Path
@@ -127,6 +133,7 @@ if ($libreC -lt 4) { Falla "C: casi no tiene espacio ($libreC GB). Libera al men
 Ok "Administrador, 64 bits, $libre GB libres en $($Raiz.Substring(0, 2))"
 # Que la siguiente vez (reparar, actualizar) use la misma carpeta
 [Environment]::SetEnvironmentVariable("JULIA_DIR", $Raiz, "User")
+$env:JULIA_DIR = $Raiz   # la app pone ahi Archivos\ y Respaldos\ (backend/app/carpetas.py)
 # Caches de descargas en la misma carpeta (por defecto irian a C:)
 $env:UV_CACHE_DIR          = Join-Path $Raiz "cache\uv"
 $env:UV_PYTHON_INSTALL_DIR = Join-Path $Raiz "python"
@@ -134,12 +141,41 @@ $env:HF_HOME               = Join-Path $Raiz "cache\huggingface"
 if (-not (Tiene "winget")) { Falla "Falta winget (App Installer). Instalalo desde la Microsoft Store y vuelve a intentar." }
 Refrescar-Path
 
+# Restos de un intento anterior en C: (antes todo iba ahi): el proyecto recien
+# clonado (sin entorno de Python) y la carpeta de MySQL sin servicio.
+$viejo = Join-Path $env:LOCALAPPDATA "JULIA"
+if ($Raiz -ne $viejo -and (Test-Path (Join-Path $viejo "app\.git")) -and -not (Test-Path (Join-Path $viejo "app\backend\.venv"))) {
+    Remove-Item -Recurse -Force (Join-Path $viejo "app") -ErrorAction SilentlyContinue
+    Aviso "Se quito la copia del proyecto que habia quedado en $viejo"
+}
+$mysqlViejo = Join-Path $env:ProgramData "JULIA\mysql"
+if ($MysqlDir -ne $mysqlViejo -and (Test-Path $mysqlViejo) -and -not (Get-Service $Servicio -ErrorAction SilentlyContinue)) {
+    Remove-Item -Recurse -Force (Join-Path $env:ProgramData "JULIA") -ErrorAction SilentlyContinue
+    Aviso "Se quito la carpeta de MySQL incompleta de $mysqlViejo"
+}
+
 # --- 1. Programas -------------------------------------------------------------------
 Paso "1/7 Programas necesarios"
 Instalar-Winget "Microsoft.VCRedist.2015+.x64" "Visual C++ (runtime)" $null
 Instalar-Winget "Git.Git" "Git" "git"
 Instalar-Winget "astral-sh.uv" "uv (Python)" "uv"
-Instalar-Winget "Ollama.Ollama" "Ollama" "ollama"
+$ollamaDestino = if ($Programas) { Join-Path $Programas "Ollama" } else { $null }
+$ollamaActual  = Get-Command ollama -ErrorAction SilentlyContinue
+$marcaOllama   = if ($Programas) { Join-Path $Programas "ollama-movido.txt" } else { $null }
+if ($ollamaDestino -and $ollamaActual -and -not (Test-Path $marcaOllama) -and
+    -not $ollamaActual.Source.StartsWith($ollamaDestino, [StringComparison]::OrdinalIgnoreCase)) {
+    # (una sola vez: si el instalador de Ollama ignorara la carpeta, no se
+    # reinstala en cada intento)
+    New-Item -ItemType Directory -Force -Path $Programas | Out-Null
+    Set-Content -Path $marcaOllama -Value (Get-Date -Format s)
+    # Quedo en C: (intento anterior o instalado antes): se pasa al otro disco.
+    # Ollama pesa varios GB con sus librerias.
+    Write-Host "    Ollama esta en $($ollamaActual.Source); se reinstala en $ollamaDestino"
+    Get-Process -Name "ollama*" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    Nativo { winget uninstall --id Ollama.Ollama -e --silent --disable-interactivity }
+    Refrescar-Path
+}
+Instalar-Winget "Ollama.Ollama" "Ollama" "ollama" $ollamaDestino
 $mysqld = Get-ChildItem "C:\Program Files\MySQL\MySQL Server*\bin\mysqld.exe" -ErrorAction SilentlyContinue | Sort-Object FullName | Select-Object -Last 1
 if (-not $mysqld) {
     Instalar-Winget "Oracle.MySQL" "MySQL" $null
@@ -174,7 +210,7 @@ datadir=$($datos -replace '\\','/')
 port=3306
 bind-address=127.0.0.1
 character-set-server=utf8mb4
-"@ | Set-Content -Path $ini -Encoding ASCII   # todo ASCII: ProgramData y Program Files
+"@ | Set-Content -Path $ini -Encoding ASCII   # rutas solo ASCII (ver $MysqlDir)
     $marca = Join-Path $MysqlDir "inicializado.txt"
     if ((Test-Path $datos) -and -not (Test-Path $marca)) {
         # Quedo a medias en un intento anterior (todavia sin servicio ni datos

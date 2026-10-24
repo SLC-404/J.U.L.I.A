@@ -18,13 +18,15 @@ $Puerto  = if ($env:ASISTENTE_PORT) { $env:ASISTENTE_PORT } else { 8000 }
 $Url     = "http://127.0.0.1:$Puerto"
 New-Item -ItemType Directory -Force -Path $Logs | Out-Null
 # Caches y modelos junto a J.U.L.I.A. (puede ser D:), igual que en instalar.ps1
+$env:JULIA_DIR     = $Raiz   # Archivos\ y Respaldos\ por defecto (backend/app/carpetas.py)
 $env:UV_CACHE_DIR  = Join-Path $Raiz "cache\uv"
 $env:HF_HOME       = Join-Path $Raiz "cache\huggingface"
 if (Test-Path (Join-Path $Raiz "ollama-modelos")) { $env:OLLAMA_MODELS = Join-Path $Raiz "ollama-modelos" }
 $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
             [Environment]::GetEnvironmentVariable("Path", "User") + ";" +
             (Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links") + ";" +
-            (Join-Path $env:LOCALAPPDATA "Programs\Ollama")
+            (Join-Path $env:LOCALAPPDATA "Programs\Ollama") + ";" +
+            (Join-Path $Raiz "programas\Ollama")
 
 Add-Type -AssemblyName System.Windows.Forms
 function Avisar($mensaje) {
@@ -55,8 +57,9 @@ if (-not (Puerto-Abierto 3306)) {
 
 # 2. Ollama (el modelo de IA)
 if (-not (Puerto-Abierto 11434)) {
-    $ollamaApp = Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama app.exe"
-    if (Test-Path $ollamaApp) { Start-Process $ollamaApp }
+    $ollamaApp = @((Join-Path $Raiz "programas\Ollama\ollama app.exe"),
+                   (Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama app.exe")) | Where-Object { Test-Path $_ } | Select-Object -First 1
+    if ($ollamaApp) { Start-Process $ollamaApp }
     else { Start-Process -WindowStyle Hidden -FilePath "ollama" -ArgumentList "serve" }
     if (-not (Esperar-Puerto 11434 30)) { Avisar "No se pudo encender Ollama (el modelo de IA). Avísale a César." }
 }

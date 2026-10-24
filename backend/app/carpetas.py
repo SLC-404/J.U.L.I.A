@@ -4,9 +4,11 @@ desde la app; se guarda en la tabla `ajustes`.
 
 - Archivos: los Word de cada caso, en <carpeta>/Casos/<Cliente>/<Servicio (caso N)>/
   con nombres legibles, para que la Lic. los encuentre en el Explorador.
-  Por defecto ~/J.U.L.I.A. (en Windows C:\\Users\\<ella>\\J.U.L.I.A.).
+  Por defecto ~/J.U.L.I.A.; en Windows, <JULIA_DIR>\\Archivos (p. ej.
+  D:\\JULIA\\Archivos: el instalador pone todo en el disco con mas espacio).
 - Respaldos: copia diaria de la base y de los documentos. Por defecto
-  ~/Respaldos-JULIA (donde ya estaban en la Mac).
+  ~/Respaldos-JULIA (donde ya estaban en la Mac); en Windows
+  <JULIA_DIR>\\Respaldos.
 
 Ninguna va en Documentos por defecto: en Windows OneDrive suele subir
 Documentos a la nube (y en la Mac, iCloud), y los datos de los clientes no
@@ -34,6 +36,9 @@ _NUBE = ("OneDrive", "iCloud", "Mobile Documents", "CloudStorage", "Google Drive
 
 
 def por_defecto() -> dict[str, Path]:
+    # JULIA_DIR lo pone el instalador de Windows (launcher/windows/instalar.ps1)
+    if raiz := os.getenv("JULIA_DIR"):
+        return {"archivos": Path(raiz) / "Archivos", "respaldos": Path(raiz) / "Respaldos"}
     return {"archivos": Path.home() / "J.U.L.I.A.", "respaldos": Path.home() / "Respaldos-JULIA"}
 
 
