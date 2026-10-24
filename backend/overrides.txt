@@ -1,0 +1,9 @@
+# Dependencias de chatterbox-tts que J.U.L.I.A. NO necesita y que estorban
+# en Windows (uv las quita con el marcador imposible). Se usa asi:
+#   uv pip install -r requirements.txt --overrides overrides.txt
+#
+# spacy-pkuseg: solo para chino; en Windows con Python 3.14 no trae version
+#   compilada y pediria un compilador de C. Chatterbox funciona sin ella.
+# gradio: la pagina de demo de Chatterbox; pesada y no se usa.
+spacy-pkuseg ; sys_platform == "never"
+gradio ; sys_platform == "never"

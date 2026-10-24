@@ -403,3 +403,59 @@ En GitHub solo va el código (ver `.gitignore`): nada de `storage/`,
 importación inicial (`importar_casos.py`, `registrar_clientes_y_servicios.py`),
 que traen la lista real de clientes y se quedan solo en la Mac.
 `frontend/dist/` sí se sube, para que Windows no necesite Node.
+
+## Windows (laptop de la Lic.)
+
+Scripts en `launcher/windows/`. Todo queda en la computadora; internet solo
+para instalar y para actualizarse.
+
+### 1. En la Mac: armar el paquete de datos
+
+```bash
+cd backend && .venv/bin/python -m app.paquete exportar
+```
+
+Deja `~/JULIA-paquete-AAAA-MM-DD_HHMM.zip` (~140 MB) con la base, los Word
+de los casos, los escritos del despacho, el índice del RAG y la voz de
+J.U.L.I.A. **Trae datos de clientes: pásalo por USB y bórralo al terminar.**
+
+### 2. En Windows: instalar (una vez)
+
+PowerShell **como administrador** (clic derecho → Ejecutar como administrador):
+
+```powershell
+irm https://raw.githubusercontent.com/SLC-404/J.U.L.I.A/main/launcher/windows/instalar.ps1 | iex
+```
+
+- Instala con winget lo que falte: Git, uv (que trae su propio Python
+  3.14), Ollama, MySQL y Visual C++.
+- Baja el proyecto a `%LOCALAPPDATA%\JULIA\app`.
+- MySQL queda como servicio `JULIA-MySQL` (arranca con Windows, solo escucha
+  en 127.0.0.1, datos en `C:\ProgramData\JULIA\mysql`).
+- Baja los modelos (~12 GB): qwen + nomic-embed-text, Whisper, Piper y
+  Chatterbox.
+- Pregunta por el paquete de datos: se arrastra el .zip a la ventana. Sin
+  paquete, empieza vacía e indexa las leyes.
+- Crea el ícono **J.U.L.I.A.** en el escritorio y en el menú Inicio.
+- Se puede volver a correr para reparar: lo que ya está se salta.
+- Log: `%LOCALAPPDATA%\JULIA\logs\instalacion.log`.
+
+### 3. Uso diario
+
+Doble clic en el ícono (`iniciar.ps1`): enciende MySQL y Ollama si hacen
+falta, **se actualiza solo desde GitHub** (y reinstala librerías si
+cambiaron), hace el respaldo del día y abre el navegador. Para detener:
+`launcher\windows\detener.ps1`.
+
+### Notas
+
+- `backend/overrides.txt` quita dos dependencias de Chatterbox que no se
+  usan (`spacy-pkuseg`, solo chino, y `gradio`, su demo): en Windows con
+  Python 3.14 `spacy-pkuseg` pediría un compilador de C.
+- Los `.doc` viejos se leen con el Word de la Lic. (`pywin32`); en la Mac
+  con `textutil`.
+- Importar un paquete encima de datos existentes: `python -m app.paquete
+  importar paquete.zip --reemplazar` (lo de antes se aparta con fecha, no se
+  borra).
+- Sin probar todavía en Windows real: la primera instalación en la Huawei es
+  la prueba de verdad (ver `logs\instalacion.log` si algo falla).

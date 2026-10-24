@@ -19,3 +19,5 @@ numpy
 chatterbox-tts
 num2words
 setuptools<81
+# Windows: leer .doc viejos con el Word de la Lic.
+pywin32; sys_platform == "win32"

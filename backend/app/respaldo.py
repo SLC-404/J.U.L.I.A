@@ -36,26 +36,27 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 CONSERVAR = 60
 
 
-def _mysqldump() -> str:
+def buscar_mysql(programa: str = "mysqldump") -> str:
+    """Ruta de `mysqldump` o `mysql` (el cliente), en Mac o Windows."""
+    exe = programa + ".exe"
     candidatos = [
-        os.getenv("MYSQLDUMP"),
-        shutil.which("mysqldump"),
-        # MySQL que instala J.U.L.I.A. en Windows (junto al proyecto)
-        str(BASE_DIR.parent / "mysql" / "bin" / "mysqldump.exe"),
-        *sorted(glob.glob(r"C:\Program Files\MySQL\MySQL Server*\bin\mysqldump.exe")),
-        *sorted(glob.glob("/Users/Shared/DBngin/mysql/*/bin/mysqldump")),  # Mac con DBngin
+        os.getenv(programa.upper()),
+        shutil.which(programa),
+        # MySQL que instala J.U.L.I.A. en Windows (launcher/windows/instalar.ps1)
+        *sorted(glob.glob(rf"C:\Program Files\MySQL\MySQL Server*\bin\{exe}")),
+        *sorted(glob.glob(f"/Users/Shared/DBngin/mysql/*/bin/{programa}")),  # Mac con DBngin
     ]
     for c in candidatos:
         if c and Path(c).exists():
             return c
-    raise RuntimeError("No encontré mysqldump")
+    raise RuntimeError(f"No encontré {programa}")
 
 
 def _base_de_datos(destino: Path) -> Path:
     url = make_url(DATABASE_URL)
     archivo = destino / f"dev002_{datetime.now():%Y-%m-%d_%H%M}.sql.gz"
     tmp = archivo.with_name(archivo.name + ".tmp")
-    cmd = [_mysqldump(), "-h", url.host or "127.0.0.1", "-P", str(url.port or 3306), "-u", url.username or "root",
+    cmd = [buscar_mysql("mysqldump"), "-h", url.host or "127.0.0.1", "-P", str(url.port or 3306), "-u", url.username or "root",
            "--single-transaction", "--routines", "--no-tablespaces", "--set-gtid-purged=OFF", url.database or "dev002"]
     env = {**os.environ, "MYSQL_PWD": url.password or ""}  # sin poner la contrasena en la linea de comando
     with gzip.open(tmp, "wb") as salida:
