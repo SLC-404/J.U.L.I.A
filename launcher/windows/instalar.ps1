@@ -76,16 +76,36 @@ function Refrescar-Path {
 
 function Tiene($comando) { [bool](Get-Command $comando -ErrorAction SilentlyContinue) }
 
+function Winget-Instalar($id, $extra) {
+    # --source winget: sin la Microsoft Store, que falla seguido
+    Nativo { winget install --id $id -e --source winget --silent --accept-package-agreements --accept-source-agreements --disable-interactivity @extra }
+}
+
 function Instalar-Winget($id, $nombre, $comando, $ubicacion = $null) {
     if ($comando -and (Tiene $comando)) { Ok "$nombre ya esta instalado"; return }
     Write-Host "    Instalando $nombre..."
     $extra = @()
     if ($ubicacion) { $extra = @("--location", $ubicacion); Write-Host "    en $ubicacion" }
-    Nativo { winget install --id $id -e --silent --accept-package-agreements --accept-source-agreements --disable-interactivity @extra }
+    Winget-Instalar $id $extra
     # 0 = listo; -1978335189 = ya estaba instalado y no hay version nueva
-    if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1978335189) { Falla "No se pudo instalar $nombre (winget $LASTEXITCODE)" }
+    $listo = @(0, -1978335189)
+    if ($LASTEXITCODE -notin $listo) {
+        # Lo mas comun: se dano la cache de winget ("Fast Cache data not
+        # found", 0x80071130). Se repara y se intenta una vez mas.
+        Aviso "winget fallo ($LASTEXITCODE); reparando sus fuentes y reintentando..."
+        Nativo { winget source reset --force }
+        Nativo { winget source update }
+        Winget-Instalar $id $extra
+        if ($LASTEXITCODE -notin $listo) { Falla "No se pudo instalar $nombre (winget $LASTEXITCODE)" }
+    }
     Refrescar-Path
     Ok "$nombre instalado"
+}
+
+function Tiene-VCRedist {
+    # Visual C++ 2015-2022 x64 ya instalado (lo trae casi toda computadora)
+    $r = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64" -ErrorAction SilentlyContinue
+    return [bool]($r -and $r.Installed -eq 1)
 }
 
 function Puerto-Abierto($puerto) {
@@ -156,7 +176,8 @@ if ($MysqlDir -ne $mysqlViejo -and (Test-Path $mysqlViejo) -and -not (Get-Servic
 
 # --- 1. Programas -------------------------------------------------------------------
 Paso "1/7 Programas necesarios"
-Instalar-Winget "Microsoft.VCRedist.2015+.x64" "Visual C++ (runtime)" $null
+if (Tiene-VCRedist) { Ok "Visual C++ (runtime) ya esta instalado" }
+else { Instalar-Winget "Microsoft.VCRedist.2015+.x64" "Visual C++ (runtime)" $null }
 Instalar-Winget "Git.Git" "Git" "git"
 Instalar-Winget "astral-sh.uv" "uv (Python)" "uv"
 $ollamaDestino = if ($Programas) { Join-Path $Programas "Ollama" } else { $null }
@@ -172,7 +193,7 @@ if ($ollamaDestino -and $ollamaActual -and -not (Test-Path $marcaOllama) -and
     # Ollama pesa varios GB con sus librerias.
     Write-Host "    Ollama esta en $($ollamaActual.Source); se reinstala en $ollamaDestino"
     Get-Process -Name "ollama*" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-    Nativo { winget uninstall --id Ollama.Ollama -e --silent --disable-interactivity }
+    Nativo { winget uninstall --id Ollama.Ollama -e --source winget --silent --disable-interactivity }
     Refrescar-Path
 }
 Instalar-Winget "Ollama.Ollama" "Ollama" "ollama" $ollamaDestino
