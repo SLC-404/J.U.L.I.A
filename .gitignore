@@ -1,0 +1,28 @@
+# J.U.L.I.A. -- repo PUBLICO: aqui solo va el codigo. Nada de datos de
+# clientes, chats, escritos, respaldos ni contrasenas.
+
+# Datos de clientes y del despacho (viven solo en la computadora)
+storage/
+backend/storage/
+backend/escritos_despacho/
+backend/chroma_db/
+backend/.env
+logs/
+# Scripts de la importacion inicial: traen la lista real de clientes
+backend/scripts/importar_casos.py
+backend/scripts/registrar_clientes_y_servicios.py
+
+# Modelos y archivos grandes que se bajan solos
+backend/modelos_voz/
+backend/legal_corpus/
+
+# Entornos y basura
+.venv/
+venv/
+__pycache__/
+*.pyc
+node_modules/
+.DS_Store
+*.bak
+launcher/JULIA.app/
+.claude/settings.local.json

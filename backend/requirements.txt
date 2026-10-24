@@ -1,0 +1,21 @@
+fastapi
+uvicorn[standard]
+sqlmodel
+pymysql
+python-dotenv
+ollama
+chromadb
+llama-index-core
+llama-index-embeddings-ollama
+llama-index-vector-stores-chroma
+llama-index-readers-file
+pypdf
+python-docx
+certifi
+faster-whisper
+piper-tts
+numpy
+# Voz humana (Chatterbox). Pide setuptools<81 (usa pkg_resources).
+chatterbox-tts
+num2words
+setuptools<81
